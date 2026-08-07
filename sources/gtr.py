@@ -303,5 +303,15 @@ def resolve_names(signals: list[Signal]) -> None:
     save_name_cache(cache)
 
     for s in signals:
+        # Only touch signals that actually came from GtR's link-UUID model
+        # (i.e. have an org_ids/person_ids key in raw at all). Other sources
+        # -- CORDIS included -- populate `organisations`/`people` directly
+        # themselves and must not be overwritten here just because they
+        # don't have GtR-specific raw keys. This was a real bug: the first
+        # merged GtR+CORDIS run clobbered every CORDIS signal's correctly
+        # resolved organisation names back to empty, because this loop used
+        # to run unconditionally over the whole merged signal list.
+        if "org_ids" not in s.raw and "person_ids" not in s.raw:
+            continue
         s.organisations = [org_cache[oid] for oid in s.raw.get("org_ids", []) if oid in org_cache]
         s.people = [person_cache[pid] for pid in s.raw.get("person_ids", []) if pid in person_cache]
