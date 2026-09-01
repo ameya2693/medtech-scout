@@ -52,7 +52,11 @@ CPC_CLASSES = [
 ]
 
 # UKRI lead funders most likely to fund translational diagnostics work.
-# Used to up-weight (not exclude) grant signals in scoring.
+# Kept as a MINOR tie-breaker in scoring now, not a dominant factor -- see
+# core/score.py. Funder name alone is a weak proxy for "went to a company",
+# since e.g. MRC/BBSRC/EPSRC mostly fund universities directly, while
+# grantCategory and organisation-type (see below) are much more direct
+# signals of the same thing.
 PRIORITY_FUNDERS = {
     "MRC",            # Medical Research Council (incl. DPFS translational)
     "EPSRC",          # engineering (microfluidics, devices)
@@ -102,3 +106,86 @@ def gtr_search_terms() -> list[str]:
         "biosensor diagnostic",
         "lateral flow assay",
     ]
+
+
+# --- Company vs. academic-institution detection -----------------------------
+# Used to score "which companies are getting funded" higher than "which
+# universities are getting funded" -- a direct ask, not a proxy. Matching is
+# deliberately simple and name-based: a legal-entity suffix is a strong,
+# language-independent signal across UK and EU organisation names alike.
+
+COMPANY_SUFFIXES = [
+    "ltd", "limited", "llc", "plc", "inc", "incorporated", "corp", "corporation",
+    "gmbh", "sa", "s.a.", "srl", "s.r.l.", "bv", "b.v.", "ag", "ab", "oy",
+    "nv", "n.v.", "sarl", "s.a.r.l.", "kft", "sp. z o.o.", "spzoo",
+]
+ACADEMIC_MARKERS = [
+    "university", "universit", "college", "institute of", "school of",
+    "hospital", "nhs", "polytechnic", "academy of", "centre national",
+    "national oceanography centre", "fraunhofer", "cnrs", "max planck",
+    "national physical laboratory", "npl management",
+]
+
+_COMPANY_SUFFIX_RE = re.compile(
+    r"\b(" + "|".join(re.escape(s) for s in COMPANY_SUFFIXES) + r")\b\.?", re.I
+)
+_ACADEMIC_MARKER_RE = re.compile(
+    "|".join(re.escape(m) for m in ACADEMIC_MARKERS), re.I
+)
+
+
+def is_company_org(name: str) -> bool:
+    """True if an organisation name looks like an actual company rather than
+    a university/HEI/public research body. Suffix match wins if present
+    (fairly unambiguous); otherwise fall back to "doesn't look academic"."""
+    if not name:
+        return False
+    if _COMPANY_SUFFIX_RE.search(name):
+        return True
+    if _ACADEMIC_MARKER_RE.search(name):
+        return False
+    # Ambiguous (no suffix, no academic marker) -- default to "not a company"
+    # since precision matters more than recall here; false negatives (missing
+    # a company) are cheaper than false positives (crediting a research
+    # institute as if it were a startup).
+    return False
+
+
+def any_company_org(organisations: list[str]) -> bool:
+    return any(is_company_org(o) for o in organisations)
+
+
+# --- Commercial vs. academic-track grant classification ---------------------
+# GtR's `grantCategory` field distinguishes translational/commercial funding
+# (money that goes toward building a product/company) from academic-track
+# funding (money that trains a person). We want to surface the former.
+
+COMMERCIAL_GRANT_CATEGORY_TERMS = [
+    "grant for r&d", "collaborative r&d", "feasibility study",
+    "knowledge transfer partnership", "ktp", "smart grant", "innovate uk",
+]
+ACADEMIC_GRANT_CATEGORY_TERMS = [
+    "studentship", "fellowship", "training grant", "doctoral", "phd",
+    "career development", "early career",
+]
+
+_COMMERCIAL_CATEGORY_RE = re.compile(
+    "|".join(re.escape(t) for t in COMMERCIAL_GRANT_CATEGORY_TERMS), re.I
+)
+_ACADEMIC_CATEGORY_RE = re.compile(
+    "|".join(re.escape(t) for t in ACADEMIC_GRANT_CATEGORY_TERMS), re.I
+)
+
+
+def grant_category_track(category: str) -> str:
+    """Classify a GtR grantCategory string as 'commercial', 'academic', or
+    'neutral' (e.g. plain 'Research Grant', which doesn't clearly indicate
+    either track). Used by core.score to weight spin-out-track funding above
+    pure PhD/fellowship funding, per the project's explicit priority."""
+    if not category:
+        return "neutral"
+    if _COMMERCIAL_CATEGORY_RE.search(category):
+        return "commercial"
+    if _ACADEMIC_CATEGORY_RE.search(category):
+        return "academic"
+    return "neutral"

@@ -28,7 +28,6 @@ import sys
 from datetime import date
 from pathlib import Path
 
-# Load .env if python-dotenv is available; this is optional, not required.
 try:
     from dotenv import load_dotenv
 
@@ -83,8 +82,6 @@ def main(argv: list[str] | None = None) -> int:
             cordis_signals = cordis.fetch_signals()
             signals.extend(cordis_signals)
         except Exception:
-            # CORDIS is a newer, less-verified source (see sources/cordis.py) --
-            # a failure here shouldn't blank out a run that still has GtR results.
             logger.exception("CORDIS fetch failed; continuing with GtR signals only")
     else:
         logger.info("Skipping CORDIS (--no-cordis)")
@@ -92,17 +89,27 @@ def main(argv: list[str] | None = None) -> int:
     if not signals:
         logger.warning("No domain-matching signals found this run. Writing an empty report.")
 
-    logger.info("Scoring %d signals...", len(signals))
-    scored = score_signals(signals)
-    scored = scored[: args.limit]
+    logger.info("Scoring %d signals (preliminary pass)...", len(signals))
+    # Two-pass scoring is necessary, not cosmetic: GtR signals don't have
+    # real organisation names until resolve_names() runs (only UUIDs before
+    # that), so the company-vs-university bonus in core.score can't fire on
+    # a first pass. Score once to pick a generous candidate pool for name
+    # resolution (wider than the final report limit, so a real company
+    # signal that scored modestly before resolution doesn't get excluded
+    # before it even gets a chance to earn its company bonus), resolve names
+    # for that pool, then re-score for real and take the final top --limit.
+    preliminary = score_signals(signals)
+    candidate_pool_size = max(args.limit * 3, 150)
+    candidates = preliminary[:candidate_pool_size]
 
-    logger.info("Resolving organisation/person names for the top %d signals...", len(scored))
+    logger.info("Resolving organisation/person names for %d candidates...", len(candidates))
     try:
-        gtr.resolve_names(scored)
+        gtr.resolve_names(candidates)
     except Exception:
-        # Name resolution is an enrichment step, not core to the report -- a
-        # failure here (e.g. GtR flaking mid-run) shouldn't blank the whole run.
         logger.exception("Name resolution failed; continuing with unresolved organisations/people")
+
+    logger.info("Scoring %d candidates (final pass, with resolved names)...", len(candidates))
+    scored = score_signals(candidates)[: args.limit]
 
     logger.info("Diffing against previous state (%s)...", args.state_path)
     seen_before = load_seen_keys(args.state_path)

@@ -1,17 +1,36 @@
 """Scoring for individual signals.
 
-Phase 1 scores signals independently (no cross-source clustering yet -- that
-lands in Phase 4's core/cluster.py, which will combine these into Venture
-scores). The scoring model is deliberately simple and legible: every point
-added has a printed reason, so the report can show its working rather than
-handing you an opaque number.
+Redesigned around three explicit priorities (previously the score was
+dominated by funder name and target-country presence, which turned out to
+reward the wrong things -- see the conversation history that led to this):
+
+1. TOPIC PROXIMITY is now the primary driver: how strongly a signal's text
+   actually matches the domain (number/specificity of matched terms), not
+   just a binary "did it match at all".
+2. COMPANY vs. UNIVERSITY: a real organisation (Ltd/GmbH/SA/etc.) receiving
+   funding scores well above a university receiving funding. This directly
+   answers "which companies are getting funded", the actual question this
+   tool exists to answer.
+3. COMMERCIAL vs. ACADEMIC grant track: GtR's grantCategory field lets us
+   tell a Knowledge Transfer Partnership or Innovate UK R&D grant (money
+   headed toward a product/company) apart from a Studentship or Fellowship
+   (money headed toward training a person). The former is weighted well
+   above the latter.
+
+Funder name and target-country presence are now MINOR tie-breakers, not
+dominant factors -- they used to be the main thing separating signals, which
+meant location and funding body were doing the differentiating instead of
+actual topic/commercial relevance, the opposite of what this tool should do.
+
+Every point added still has a printed reason, so the report can show its
+working rather than handing over an opaque number.
 """
 
 from __future__ import annotations
 
 from datetime import date
 
-from core.domain import PRIORITY_FUNDERS
+from core.domain import PRIORITY_FUNDERS, STRONG_TERMS, any_company_org, grant_category_track
 from core.models import Signal, SignalType
 
 # How recent is "recent"? Translational grants stay relevant signal for a
@@ -23,47 +42,129 @@ RECENCY_WINDOWS_DAYS = {
     SignalType.FUNDING_ROUND: 2 * 365,
 }
 
+# Base score by type is now a small baseline, not a major differentiator --
+# topic proximity and the company/commercial-track bonuses below do most of
+# the actual ranking work.
 BASE_SCORE_BY_TYPE = {
-    # Earlier-stage signals score higher: that's the point of scouting upstream.
-    SignalType.GRANT: 5.0,
-    SignalType.PATENT: 6.0,
-    SignalType.INCORPORATION: 4.0,
-    SignalType.FUNDING_ROUND: 2.0,  # by the time it's a funding round, it's not a "find" anymore
+    SignalType.GRANT: 2.0,
+    SignalType.PATENT: 2.5,
+    SignalType.INCORPORATION: 1.5,
+    SignalType.FUNDING_ROUND: 1.0,
 }
+
+# --- Primary drivers ---------------------------------------------------------
+
+TOPIC_TERM_WEIGHT = 0.5     # per distinct matched domain term
+TOPIC_TERM_CAP = 6          # caps so one keyword-stuffed abstract can't dominate purely on volume
+STRONG_TERM_BONUS = 1.0     # extra credit when a STRONG_TERMS phrase fired directly (higher precision than a platform+application pair)
+
+COMPANY_ORG_BONUS = 2.5     # "which companies are getting funded" -- the explicit priority
+
+COMMERCIAL_GRANT_BONUS = 2.0    # KTP / Grant for R&D / Innovate UK-style: money headed toward a product/company
+ACADEMIC_GRANT_PENALTY = -1.5   # Studentship / Fellowship / Training Grant: money headed toward training a person, not a company
+
+# --- Minor tie-breakers (demoted from their previous dominant role) --------
+
+PRIORITY_FUNDER_BOOST = 0.3
+TARGET_COUNTRY_BOOST = 0.3
+MULTI_INVESTIGATOR_BONUS = 0.3
+
+_STRONG_TERMS_LOWER = {t.lower() for t in STRONG_TERMS}
+
+
+def _topic_proximity_score(signal: Signal) -> tuple[float, str]:
+    terms = signal.raw.get("matched_terms", [])
+    n = min(len(terms), TOPIC_TERM_CAP)
+    score = n * TOPIC_TERM_WEIGHT
+    reason = f"topic proximity: {n} matched term(s) (+{score:.2f})"
+    if any(t in _STRONG_TERMS_LOWER for t in terms):
+        score += STRONG_TERM_BONUS
+        reason += f", strong-term match (+{STRONG_TERM_BONUS:.2f})"
+    return score, reason
 
 
 def score_signal(signal: Signal, *, today: date | None = None) -> Signal:
-    """Score a single signal in place and return it (for easy chaining)."""
+    """Score a single signal in place and return it (for easy chaining).
+
+    Safe to call more than once on the same signal (idempotent): the first
+    call snapshots the source parser's original reasons (domain match,
+    funder, grant category) into `raw["_source_reasons"]`, and every call
+    rebuilds `score_reasons` from that snapshot rather than accumulating on
+    top of a previous scoring pass's computed additions. This matters
+    because organisation names aren't resolved until AFTER the first scoring
+    pass (see run.py) -- the company-vs-university bonus below can only
+    fire once real names are in, so signals get scored twice: once to pick
+    a resolution candidate pool, once for real after resolve_names runs.
+    """
     today = today or date.today()
     score = BASE_SCORE_BY_TYPE.get(signal.signal_type, 1.0)
-    reasons = list(signal.score_reasons)  # keep domain-match reasons already attached
 
-    # Recency decay: full marks inside the window, linear falloff to zero at 2x window.
+    if "_source_reasons" not in signal.raw:
+        signal.raw["_source_reasons"] = list(signal.score_reasons)
+    reasons = list(signal.raw["_source_reasons"])
+
+    topic_score, topic_reason = _topic_proximity_score(signal)
+    score += topic_score
+    reasons.append(topic_reason)
+
+    # Recency decay: full marks inside the window, linear falloff to zero at
+    # 2x window. A negative age (future-dated signal -- seen recurring in
+    # GtR data, e.g. a project "starting" in 2028 during a 2026 run) is
+    # flagged as a data-quality issue and capped rather than rewarded as if
+    # it were genuinely fresh -- the old logic silently gave these full
+    # marks, which was wrong.
     if signal.signal_date:
         age_days = (today - signal.signal_date).days
-        window = RECENCY_WINDOWS_DAYS.get(signal.signal_type, 3 * 365)
-        if age_days <= window:
-            recency_factor = 1.0
-        elif age_days <= 2 * window:
-            recency_factor = 1.0 - (age_days - window) / window
+        if age_days < 0:
+            recency_factor = 0.5
+            reasons.append(
+                f"future-dated signal (age {age_days}d) -- likely a data-quality issue "
+                f"upstream, recency capped at {recency_factor:.2f} rather than treated as fresh"
+            )
         else:
-            recency_factor = 0.0
+            window = RECENCY_WINDOWS_DAYS.get(signal.signal_type, 3 * 365)
+            if age_days <= window:
+                recency_factor = 1.0
+            elif age_days <= 2 * window:
+                recency_factor = 1.0 - (age_days - window) / window
+            else:
+                recency_factor = 0.0
+            reasons.append(f"recency factor {recency_factor:.2f} (age {age_days}d)")
         score *= max(recency_factor, 0.0)
-        reasons.append(f"recency factor {recency_factor:.2f} (age {age_days}d)")
     else:
-        # No date is a mild penalty, not a disqualifier -- some sources omit it.
         score *= 0.7
         reasons.append("no date available (0.7x)")
 
-    # Priority funder boost (grants only).
-    if signal.signal_type == SignalType.GRANT:
-        for reason in signal.score_reasons:
-            if reason.startswith("funder:"):
-                funder = reason.split(":", 1)[1].strip()
-                if funder in PRIORITY_FUNDERS:
-                    score += 1.5
-                    reasons.append("priority-funder boost (+1.5)")
-                break
+    # Company vs. university -- direct priority, per project direction.
+    if any_company_org(signal.organisations):
+        score += COMPANY_ORG_BONUS
+        reasons.append(f"company organisation present (+{COMPANY_ORG_BONUS:.2f})")
+
+    # Commercial vs. academic grant track. Only fires for signals that carry
+    # a grantCategory (currently GtR only -- CORDIS doesn't expose an
+    # equivalent field in the bulk export we parse).
+    category = signal.raw.get("grant_category", "")
+    track = grant_category_track(category)
+    if track == "commercial":
+        score += COMMERCIAL_GRANT_BONUS
+        reasons.append(f"commercial/spin-out grant track ({category!r}) (+{COMMERCIAL_GRANT_BONUS:.2f})")
+    elif track == "academic":
+        score += ACADEMIC_GRANT_PENALTY
+        reasons.append(f"academic-track grant ({category!r}) ({ACADEMIC_GRANT_PENALTY:+.2f})")
+
+    # Funder name and target-country presence: now minor tie-breakers only
+    # (previously the dominant factors -- see module docstring for why that
+    # was the wrong emphasis).
+    for reason in signal.score_reasons:
+        if reason.startswith("funder:"):
+            funder = reason.split(":", 1)[1].strip()
+            if funder in PRIORITY_FUNDERS:
+                score += PRIORITY_FUNDER_BOOST
+                reasons.append(f"known UK funder tie-breaker (+{PRIORITY_FUNDER_BOOST:.2f})")
+            break
+    if any(r.startswith("target country present:") for r in signal.score_reasons):
+        score += TARGET_COUNTRY_BOOST
+        reasons.append(f"target-country tie-breaker (+{TARGET_COUNTRY_BOOST:.2f})")
 
     # Multiple named people/orgs suggests a more established, findable group
     # rather than a one-line stub record. Scoring runs before name resolution
@@ -71,15 +172,8 @@ def score_signal(signal: Signal, *, today: date | None = None) -> Signal:
     # rather than the (still-empty at this point) resolved `people` list.
     person_count = len(signal.raw.get("person_ids", [])) or len(signal.people)
     if person_count >= 2:
-        score += 0.5
-        reasons.append("multiple named investigators (+0.5)")
-
-    # Target-country boost (CORDIS only -- see sources/cordis.py TARGET_COUNTRIES).
-    # A lightweight nudge, not a filter: signals from outside the target
-    # countries still score and appear, just without this boost.
-    if any(r.startswith("target country present:") for r in signal.score_reasons):
-        score += 1.0
-        reasons.append("target-country boost (+1.0)")
+        score += MULTI_INVESTIGATOR_BONUS
+        reasons.append(f"multiple named investigators (+{MULTI_INVESTIGATOR_BONUS:.2f})")
 
     signal.score = round(score, 2)
     signal.score_reasons = reasons
