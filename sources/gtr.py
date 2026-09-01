@@ -7,11 +7,11 @@ today can mean a spinout in 1-3 years).
 API docs: https://gtr.ukri.org/resources/api.html
 Base URL: https://gtr.ukri.org/gtr/api
 
-Field shapes below were confirmed against a live response on 2026-07-26 (not
-assumed from documentation), specifically:
+Field shapes below were confirmed against a live response (not assumed from
+documentation), specifically:
   - `leadFunder` is a flat top-level string (e.g. "EPSRC", "Innovate UK").
-  - The grant's own `start`/`end` are frequently null; the usable date lives
-    on the project's `FUND` link, as `start`/`end` epoch-millisecond ints.
+  - The usable date lives on the project's `FUND` link (not the project's
+    own `start`/`end`, which are usually null), as epoch-millisecond ints.
   - The RCUK grant reference (used for the public gtr.ukri.org URL) is under
     `identifiers.identifier[]` where `type == "RCUK"`.
   - Organisations and people are NOT embedded in the project payload -- the
@@ -177,6 +177,7 @@ def _project_to_signal(project: dict[str, Any]) -> Optional[Signal]:
         funder = (project.get("leadFunder") or "").strip()
         rcuk_ref = _extract_rcuk_ref(project)
         project_uuid = project.get("id", "")
+        grant_category = (project.get("grantCategory") or "").strip()
 
         signal = Signal(
             source="gtr",
@@ -191,8 +192,9 @@ def _project_to_signal(project: dict[str, Any]) -> Optional[Signal]:
             raw={
                 "org_ids": link_data["org_ids"],
                 "person_ids": link_data["person_ids"],
-                "grant_category": project.get("grantCategory", ""),
+                "grant_category": grant_category,
                 "status": project.get("status", ""),
+                "matched_terms": matched_terms,
             },
         )
         signal.score_reasons.append(f"domain match: {', '.join(matched_terms[:4])}")
@@ -200,6 +202,8 @@ def _project_to_signal(project: dict[str, Any]) -> Optional[Signal]:
             signal.score_reasons.append(f"funder: {funder}")
             if funder in PRIORITY_FUNDERS:
                 signal.score_reasons.append("priority funder")
+        if grant_category:
+            signal.score_reasons.append(f"grant category: {grant_category}")
         return signal
     except Exception as exc:  # noqa: BLE001 - defensive, one bad record shouldn't kill the run
         logger.warning("Skipping malformed GtR project record: %s", exc)

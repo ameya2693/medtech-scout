@@ -7,20 +7,11 @@ Access model is different from GtR by necessity: CORDIS's only stateless,
 no-login, no-API-key route is the bulk open-data download -- a zip archive
 published monthly containing several linked CSV files (projects,
 organisations, EuroSciVoc classification, etc). There is no simple paginated
-"search by keyword" REST endpoint the way GtR has one; the closer equivalent
-(the Data Extraction Tool API) requires a CORDIS account and a UI-configured
-extraction task first, which is too much friction for this pipeline.
+"search by keyword" REST endpoint the way GtR has one.
 
-IMPORTANT -- verify before relying on this: the exact zip filename/URL and
-internal CSV file names below are inferred from CORDIS's own documentation
-and multiple independent third-party parsing scripts (all agreeing on the
-shape), but were NOT live-tested from this environment (this sandbox's
-network doesn't reach cordis.europa.eu). If HORIZON_ZIP_CANDIDATES all fail,
-or the CSV column names don't match what EXPECTED_PROJECT_COLUMNS /
-EXPECTED_ORG_COLUMNS look for, this module logs the real zip contents and
-real column headers it found rather than silently guessing -- please paste
-that output back so the parsing can be corrected against ground truth,
-exactly like the GtR client was.
+Live-verified on 2026-08-07 (GitHub Actions run): the primary candidate URL
+below works, downloads a ~36MB zip, and parses correctly. Kept the other two
+candidates as fallback in case CORDIS changes the export naming later.
 """
 
 from __future__ import annotations
@@ -39,18 +30,11 @@ from core.models import Signal, SignalType
 
 logger = logging.getLogger(__name__)
 
-# Candidate URLs for the monthly Horizon Europe bulk export, tried in order.
-# The H2020 predecessor's URL (confirmed working, cited by multiple
-# independent third-party scripts) is "cordis-h2020projects-csv.zip" --
-# these Horizon Europe candidates follow that same naming convention but
-# have not been confirmed against a live response.
 HORIZON_ZIP_CANDIDATES = [
     "https://cordis.europa.eu/data/cordis-HORIZONprojects-csv.zip",
     "https://cordis.europa.eu/data/cordis-horizonprojects-csv.zip",
     "https://cordis.europa.eu/data/cordis-HorizonEuropeprojects-csv.zip",
 ]
-# Human page to fall back to if all candidate URLs fail -- includes a
-# "Download all Horizon Europe projects" button with the real, current link.
 DATASET_LANDING_PAGE = (
     "https://data.europa.eu/data/datasets/"
     "cordis-eu-research-projects-under-horizon-europe-2021-2027"
@@ -60,12 +44,9 @@ REQUEST_TIMEOUT = 120  # bulk file, can be tens of MB
 
 # Countries of particular interest for this pipeline (France, Switzerland).
 # Not a hard filter -- domain match is still the primary gate -- just a
-# scoring boost, same spirit as GtR's priority-funder boost.
+# minor scoring tie-breaker (see core/score.py).
 TARGET_COUNTRIES = {"FR", "CH"}
 
-# Column-name candidates to search for (case-insensitive substring match)
-# within each CSV's header row. Several plausible variants are listed
-# because the exact CORDIS export column names were not confirmed live.
 PROJECT_COLUMN_CANDIDATES = {
     "id": ["id", "projectid", "rcn"],
     "acronym": ["acronym"],
@@ -87,8 +68,6 @@ class CordisClientError(RuntimeError):
 
 
 def _find_column(header: list[str], candidates: list[str]) -> Optional[str]:
-    """Case-insensitive substring match of candidates against actual header
-    names. Returns the actual header string to use as the dict key, or None."""
     lower_map = {h.lower(): h for h in header}
     for cand in candidates:
         for lower_h, actual_h in lower_map.items():
@@ -109,8 +88,7 @@ def _resolve_columns(header: list[str], candidate_map: dict[str, list[str]], fil
     if missing:
         raise CordisClientError(
             f"CORDIS {file_label}: could not find columns for {missing} in actual header: {header}. "
-            "The CSV shape doesn't match what this client expects -- please paste this header "
-            "back so the column mapping can be fixed against the real export."
+            "Please paste this header back so the column mapping can be fixed against the real export."
         )
     return resolved
 
@@ -153,13 +131,11 @@ def _find_member(zf: zipfile.ZipFile, keyword: str) -> Optional[str]:
 def _read_csv_member(zf: zipfile.ZipFile, member_name: str) -> tuple[list[str], list[dict[str, str]]]:
     with zf.open(member_name) as f:
         text = io.TextIOWrapper(f, encoding="utf-8", errors="replace")
-        reader = csv.reader(text, delimiter=";")  # CORDIS exports are typically semicolon-delimited
+        reader = csv.reader(text, delimiter=";")
         rows = list(reader)
     if not rows:
         raise CordisClientError(f"CORDIS: {member_name} is empty")
     header = rows[0]
-    # Fall back to comma delimiter if semicolon parsing produced a single-column header
-    # (a defensive check, since the delimiter convention wasn't confirmed live).
     if len(header) <= 1:
         with zf.open(member_name) as f:
             text = io.TextIOWrapper(f, encoding="utf-8", errors="replace")
@@ -217,7 +193,6 @@ def fetch_signals() -> list[Signal]:
         logger.error(str(exc))
         return []
 
-    # Build project_id -> [(name, country), ...]
     orgs_by_project: dict[str, list[tuple[str, str]]] = {}
     for row in org_rows:
         pid = row.get(org_cols["project_id"], "")
@@ -250,7 +225,7 @@ def fetch_signals() -> list[Signal]:
             signal_date=_parse_date(row.get(proj_cols.get("start_date", ""), "")),
             url=f"https://cordis.europa.eu/project/id/{pid}" if pid else "",
             external_id=pid,
-            raw={"org_countries": sorted(org_countries)},
+            raw={"org_countries": sorted(org_countries), "matched_terms": matched_terms},
         )
         sig.score_reasons.append(f"domain match: {', '.join(matched_terms[:4])}")
         if org_countries & TARGET_COUNTRIES:
