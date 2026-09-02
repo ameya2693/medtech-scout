@@ -163,6 +163,7 @@ def any_company_org(organisations: list[str]) -> bool:
 COMMERCIAL_GRANT_CATEGORY_TERMS = [
     "grant for r&d", "collaborative r&d", "feasibility study",
     "knowledge transfer partnership", "ktp", "smart grant", "innovate uk",
+    "fast start",  # confirmed real category from live data (Innovate UK's early-stage SME scheme)
 ]
 ACADEMIC_GRANT_CATEGORY_TERMS = [
     "studentship", "fellowship", "training grant", "doctoral", "phd",

@@ -136,7 +136,12 @@ def score_signal(signal: Signal, *, today: date | None = None) -> Signal:
         reasons.append("no date available (0.7x)")
 
     # Company vs. university -- direct priority, per project direction.
-    if any_company_org(signal.organisations):
+    # Two signals, either sufficient: a Companies House regNumber (ground
+    # truth from GtR, catches names with no Ltd/Limited/etc suffix -- e.g.
+    # "VETERINARY ISOTHERMAL MOLECULAR DIAGNOSTICS", which the name
+    # heuristic alone missed) OR the name-suffix heuristic (works for CORDIS
+    # too, which has no regNumber equivalent).
+    if signal.raw.get("org_has_regnum") or any_company_org(signal.organisations):
         score += COMPANY_ORG_BONUS
         reasons.append(f"company organisation present (+{COMPANY_ORG_BONUS:.2f})")
 
