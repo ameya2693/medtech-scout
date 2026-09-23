@@ -4,8 +4,9 @@
 Fetches grant signals from UKRI Gateway to Research (UK) and CORDIS (EU
 Horizon Europe -- covers France, Switzerland, and every other EU/associated
 country), filters to the diagnostics/IVD/microfluidics domain, scores them,
-diffs against previous runs, optionally synthesises analyst commentary via
-the Claude API, and writes a markdown report.
+clusters them into candidate Ventures (Phase 4), diffs against previous
+runs, optionally synthesises analyst commentary via the Claude API, and
+writes a markdown report.
 
 Usage:
     python run.py                        # full run, writes report + updates state
@@ -35,6 +36,7 @@ try:
 except ImportError:
     pass
 
+from core.cluster import build_ventures
 from core.score import score_signals
 from report.markdown import build_report
 from sources import cordis, gtr
@@ -109,7 +111,19 @@ def main(argv: list[str] | None = None) -> int:
         logger.exception("Name resolution failed; continuing with unresolved organisations/people")
 
     logger.info("Scoring %d candidates (final pass, with resolved names)...", len(candidates))
-    scored = score_signals(candidates)[: args.limit]
+    candidates = score_signals(candidates)
+    scored = candidates[: args.limit]
+
+    logger.info("Clustering candidates into ventures (Phase 4)...")
+    # Cluster over the full candidate pool, not just the final top --limit --
+    # a company with 3 grants where only 1 makes the report's score cutoff
+    # should still show its full cluster, not an artificially truncated one.
+    ventures = build_ventures(candidates)
+    multi_signal_ventures = [v for v in ventures if len(v.signals) >= 2]
+    logger.info(
+        "%d ventures found, %d are multi-signal clusters",
+        len(ventures), len(multi_signal_ventures),
+    )
 
     logger.info("Diffing against previous state (%s)...", args.state_path)
     seen_before = load_seen_keys(args.state_path)
@@ -127,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("Skipping Claude synthesis (--no-claude)")
 
     logger.info("Building report...")
-    report_text = build_report(scored, new_keys=new_keys, commentary=commentary)
+    report_text = build_report(scored, new_keys=new_keys, commentary=commentary, ventures=ventures)
 
     out_path = args.out or (DEFAULT_OUT_DIR / f"medtech-scout-{date.today().isoformat()}.md")
     out_path.parent.mkdir(parents=True, exist_ok=True)
