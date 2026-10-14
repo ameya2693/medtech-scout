@@ -1,31 +1,22 @@
 """Cross-source signal clustering into candidate Ventures.
 
-Phase 4: the real differentiator over a single-source deal tracker. Groups
-signals that are actually about the same underlying venture -- whether
-that's the same company appearing across multiple grants (Mologic showing up
-in three separate consortium projects this project has already seen live),
-the same project appearing twice via two different funding mechanisms (the
-"Horizon Europe Guarantee" duplicate pattern -- a UK participant in an EU
-Horizon project shows up once via CORDIS and once via GtR under a different
-grant label), or the same named person appearing across different signals.
-
-Clustering is connected-components over a graph where two signals are linked
-if they share a normalized organisation name OR a shared named person.
-Deliberately favors precision over recall: a fuzzy name matcher would create
-false merges (two unrelated "University of X" grants sharing nothing but the
-institution), so organisation matching is exact-after-normalization, not
-fuzzy, and a stoplist excludes common infrastructure/service partners (NPL,
-national research centres, etc.) that show up across many unrelated CORDIS
-consortiums and would otherwise wrongly merge them together.
+Signals are linked when they share a COMPANY organisation or a person.
+Lesson learned: linking on any organisation let hub nodes (e.g. University of
+Leeds) chain 113 unrelated signals into one mega-cluster ("MOLOGIC LTD").
+Fixes: (1) org linking is restricted to company orgs; (2) any link key that
+touches more than MAX_SIGNALS_PER_CLUSTER_KEY signals is treated as a hub and
+skipped (with a warning).
 """
-
 from __future__ import annotations
 
+import logging
 import re
 from collections import Counter, defaultdict
 
 from core.domain import is_company_org
 from core.models import Signal, Venture
+
+logger = logging.getLogger(__name__)
 
 _COUNTRY_SUFFIX_RE = re.compile(r"\s*\([A-Z]{2,3}\)\s*$")
 _TRAILING_PUNCT_RE = re.compile(r"[.,;:]+$")
@@ -43,111 +34,105 @@ ORG_STOPLIST = {
     "LONDON SCHOOL OF HYGIENE AND TROPICAL MEDICINE ROYAL CHARTER",
 }
 
+MAX_SIGNALS_PER_CLUSTER_KEY = 6
 CLUSTER_SIZE_BONUS_PER_EXTRA_SIGNAL = 1.0
 CLUSTER_SIZE_BONUS_CAP = 4.0
 
 
 def normalize_org_name(name: str) -> str:
-    if not name:
-        return ""
-    n = _COUNTRY_SUFFIX_RE.sub("", name)
-    n = _TRAILING_PUNCT_RE.sub("", n)
-    n = _WHITESPACE_RE.sub(" ", n).strip()
-    return n.upper()
+    n = _COUNTRY_SUFFIX_RE.sub("", name or "")
+    n = _TRAILING_PUNCT_RE.sub("", n.strip())
+    return _WHITESPACE_RE.sub(" ", n).upper()
 
 
 def normalize_person_name(name: str) -> str:
-    if not name:
-        return ""
-    return _WHITESPACE_RE.sub(" ", name).strip().upper()
+    return _WHITESPACE_RE.sub(" ", (name or "").strip()).upper()
 
 
 def _signal_org_keys(signal: Signal) -> set[str]:
     keys = set()
-    for org in signal.organisations:
-        key = normalize_org_name(org)
-        if key and key not in ORG_STOPLIST:
-            keys.add(key)
+    for org in signal.organisations or []:
+        norm = normalize_org_name(org)
+        if not norm or not is_company_org(norm):
+            continue
+        if norm not in ORG_STOPLIST:
+            keys.add(f"org:{norm}")
     return keys
 
 
 def _signal_person_keys(signal: Signal) -> set[str]:
     keys = set()
-    for person in signal.people:
-        key = normalize_person_name(person)
-        if key and key != "UNNAMED":
-            keys.add(key)
+    for p in signal.people or []:
+        norm = normalize_person_name(p)
+        if norm and "UNNAMED" not in norm:
+            keys.add(f"person:{norm}")
     return keys
 
 
 def _pick_venture_name(cluster_signals: list[Signal]) -> str:
-    candidates: list[str] = []
-    for sig in cluster_signals:
-        candidates.extend(sig.organisations)
-
-    company_candidates = [normalize_org_name(o) for o in candidates if is_company_org(o)]
-    if company_candidates:
-        return Counter(company_candidates).most_common(1)[0][0]
-
-    all_normalized = [normalize_org_name(o) for o in candidates if o]
-    if all_normalized:
-        return Counter(all_normalized).most_common(1)[0][0]
-
-    return cluster_signals[0].title[:60]
+    companies = Counter()
+    others = Counter()
+    for s in cluster_signals:
+        for org in s.organisations or []:
+            norm = normalize_org_name(org)
+            if not norm:
+                continue
+            (companies if is_company_org(norm) and norm not in ORG_STOPLIST else others)[norm] += 1
+    if companies:
+        return companies.most_common(1)[0][0]
+    if others:
+        return others.most_common(1)[0][0]
+    return (cluster_signals[0].title or "Unnamed")[:60]
 
 
 def _build_venture(cluster_signals: list[Signal]) -> Venture:
-    name = _pick_venture_name(cluster_signals)
-    base_score = max(s.score for s in cluster_signals)
-    extra_signals = len(cluster_signals) - 1
-    size_bonus = min(extra_signals * CLUSTER_SIZE_BONUS_PER_EXTRA_SIGNAL, CLUSTER_SIZE_BONUS_CAP)
-    total_score = round(base_score + size_bonus, 2)
-
-    reasons = [f"cluster of {len(cluster_signals)} signal(s), base score {base_score:.2f}"]
-    if extra_signals > 0:
-        reasons.append(f"cluster size bonus (+{size_bonus:.2f} for {extra_signals} additional signal(s))")
+    best = max(s.score for s in cluster_signals)
+    extra = len(cluster_signals) - 1
+    bonus = min(extra * CLUSTER_SIZE_BONUS_PER_EXTRA_SIGNAL, CLUSTER_SIZE_BONUS_CAP)
+    reasons = []
+    if extra:
+        reasons.append(f"+{bonus:.1f} clustered: {len(cluster_signals)} signals")
         sources = sorted({s.source for s in cluster_signals})
         if len(sources) > 1:
-            reasons.append(f"appears across multiple sources: {', '.join(sources)}")
-
+            reasons.append(f"multi-source ({', '.join(sources)})")
     return Venture(
-        name=name,
+        name=_pick_venture_name(cluster_signals),
         signals=sorted(cluster_signals, key=lambda s: s.score, reverse=True),
-        score=total_score,
+        score=best + bonus,
         score_reasons=reasons,
     )
 
 
 def build_ventures(signals: list[Signal]) -> list[Venture]:
-    n = len(signals)
-    parent = list(range(n))
+    parent = list(range(len(signals)))
 
-    def find(i: int) -> int:
+    def find(i):
         while parent[i] != i:
             parent[i] = parent[parent[i]]
             i = parent[i]
         return i
 
-    def union(i: int, j: int) -> None:
-        ri, rj = find(i), find(j)
-        if ri != rj:
-            parent[ri] = rj
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
 
-    key_to_indices: dict[str, list[int]] = defaultdict(list)
-    for idx, sig in enumerate(signals):
-        for key in _signal_org_keys(sig):
-            key_to_indices[f"org:{key}"].append(idx)
-        for key in _signal_person_keys(sig):
-            key_to_indices[f"person:{key}"].append(idx)
+    key_to_idx: dict[str, list[int]] = defaultdict(list)
+    for i, s in enumerate(signals):
+        for k in _signal_org_keys(s) | _signal_person_keys(s):
+            key_to_idx[k].append(i)
 
-    for indices in key_to_indices.values():
-        for a, b in zip(indices, indices[1:]):
-            union(a, b)
+    for key, idxs in key_to_idx.items():
+        if len(idxs) > MAX_SIGNALS_PER_CLUSTER_KEY:
+            logger.warning("Skipping hub link key %r (%d signals)", key, len(idxs))
+            continue
+        for j in idxs[1:]:
+            union(idxs[0], j)
 
-    clusters: dict[int, list[int]] = defaultdict(list)
-    for idx in range(n):
-        clusters[find(idx)].append(idx)
+    groups: dict[int, list[Signal]] = defaultdict(list)
+    for i, s in enumerate(signals):
+        groups[find(i)].append(s)
 
-    ventures = [_build_venture([signals[i] for i in indices]) for indices in clusters.values()]
+    ventures = [_build_venture(g) for g in groups.values()]
     ventures.sort(key=lambda v: v.score, reverse=True)
     return ventures
