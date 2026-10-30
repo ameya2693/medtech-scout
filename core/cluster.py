@@ -40,6 +40,10 @@ _NON_ALNUM_RE = re.compile(r"[^A-Z0-9 ]+")
 
 ORG_STOPLIST = {
     "NPL MANAGEMENT", "NATIONAL OCEANOGRAPHY CENTRE", "INSTITUT PASTEUR",
+    # Large analytical-services / contract-research bodies that co-appear on
+    # other companies' grants but are not the venture being scouted:
+    "LGC", "LGC GROUP", "CENTRE FOR PROCESS INNOVATION",
+    "TEKNOLOGIAN TUTKIMUSKESKUS VTT",
 }
 # Name fragments of generic consultancies / management shells that tell us
 # nothing about a product company.

@@ -150,6 +150,7 @@ ACADEMIC_MARKERS = [
     "research center", "competence centre", "competence center", "csem",
     "national physical laboratory", "npl management", "foundation", "fundacion",
     "fundacao", "stichting", "society", "alliance", "ministry",
+    "tutkimuskeskus", "catapult", "centre for process innovation",
 ]
 
 _COMPANY_SUFFIX_RE = re.compile(

@@ -23,6 +23,7 @@ documentation), specifically:
 
 from __future__ import annotations
 
+import html
 import logging
 import time
 from datetime import date, datetime
@@ -30,7 +31,7 @@ from typing import Any, Iterator, Optional
 
 import requests
 
-from core.domain import gtr_search_terms, matches_domain, PRIORITY_FUNDERS
+from core.domain import _ACADEMIC_MARKER_RE, gtr_search_terms, matches_domain, PRIORITY_FUNDERS
 from core.models import Signal, SignalType
 from state.store import load_name_cache, save_name_cache
 
@@ -123,6 +124,7 @@ def _extract_link_data(project: dict[str, Any]) -> dict[str, Any]:
     a project's links in one pass."""
     org_ids: list[str] = []
     person_ids: list[str] = []
+    lead_org_id = ""
     fund_start: Optional[date] = None
     fund_end: Optional[date] = None
 
@@ -131,6 +133,8 @@ def _extract_link_data(project: dict[str, Any]) -> dict[str, Any]:
         href = link.get("href", "")
         if rel in ORG_RELS and href:
             org_ids.append(_uuid_from_href(href))
+            if rel == "LEAD_ORG" and not lead_org_id:
+                lead_org_id = _uuid_from_href(href)
         elif rel in PERSON_RELS and href:
             person_ids.append(_uuid_from_href(href))
         elif rel == "FUND":
@@ -140,6 +144,7 @@ def _extract_link_data(project: dict[str, Any]) -> dict[str, Any]:
     return {
         "org_ids": list(dict.fromkeys(org_ids)),      # de-dupe, preserve order
         "person_ids": list(dict.fromkeys(person_ids)),
+        "lead_org_id": lead_org_id,
         "fund_start": fund_start,
         "fund_end": fund_end,
     }
@@ -163,9 +168,10 @@ def _project_to_signal(project: dict[str, Any]) -> Optional[Signal]:
     `resolve_names()` to fill in later, lazily, for the signals that survive
     scoring and the report limit."""
     try:
-        title = project.get("title", "").strip()
-        abstract = (project.get("abstractText") or "").strip()
-        technical = (project.get("techAbstractText") or "").strip()
+        # GtR returns HTML-escaped text ("Drug Development &amp; Production")
+        title = html.unescape(project.get("title", "")).strip()
+        abstract = html.unescape(project.get("abstractText") or "").strip()
+        technical = html.unescape(project.get("techAbstractText") or "").strip()
         summary = abstract or technical
 
         combined_text = f"{title} {summary}"
@@ -191,6 +197,8 @@ def _project_to_signal(project: dict[str, Any]) -> Optional[Signal]:
             external_id=project_uuid,
             raw={
                 "org_ids": link_data["org_ids"],
+                "lead_org_id": link_data["lead_org_id"],
+                "funder": funder,
                 "person_ids": link_data["person_ids"],
                 "grant_category": grant_category,
                 "status": project.get("status", ""),
@@ -280,7 +288,7 @@ def _fetch_org_details(uuid: str) -> Optional[dict[str, Any]]:
     except GtRClientError as exc:
         logger.warning("Could not resolve organisations %s: %s", uuid, exc)
         return None
-    name = (data.get("name") or "").strip()
+    name = html.unescape(data.get("name") or "").strip()
     if not name:
         return None
     has_regnum = bool((data.get("regNumber") or "").strip())
@@ -363,5 +371,22 @@ def resolve_names(signals: list[Signal]) -> None:
             if entry.get("has_regnum"):
                 has_regnum = True
         s.organisations = [n for n in org_names if n]
+
+        # Innovate UK funds R&D to companies. If its LEAD organisation has no
+        # academic/research marker in its name but also no regNumber on record
+        # and no Ltd-style suffix (e.g. "VETERINARY ISOTHERMAL MOLECULAR
+        # DIAGNOSTICS"), treat it as a company rather than missing the bonus.
+        lead_id = s.raw.get("lead_org_id", "")
+        lead_entry = org_cache.get(lead_id) if lead_id else None
+        if (
+            not has_regnum
+            and s.raw.get("funder") == "Innovate UK"
+            and isinstance(lead_entry, dict)
+            and lead_entry.get("name")
+            and not _ACADEMIC_MARKER_RE.search(lead_entry["name"])
+        ):
+            has_regnum = True
+            s.raw["org_company_inferred"] = lead_entry["name"]
+            logger.info("Inferred company (Innovate UK lead, no regNumber): %s", lead_entry["name"])
         s.raw["org_has_regnum"] = has_regnum
         s.people = [person_cache[pid] for pid in s.raw.get("person_ids", []) if pid in person_cache]

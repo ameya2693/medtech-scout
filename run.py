@@ -57,7 +57,7 @@ def configure_logging(verbose: bool) -> None:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out", type=Path, default=None, help="Output markdown file path")
-    parser.add_argument("--limit", type=int, default=60, help="Max signals to include in the report")
+    parser.add_argument("--limit", type=int, default=100, help="Max signals to include in the report")
     parser.add_argument("--no-claude", action="store_true", help="Skip Claude synthesis")
     parser.add_argument("--no-cordis", action="store_true", help="Skip CORDIS (EU Horizon) fetch, GtR only")
     parser.add_argument("--dry-run", action="store_true", help="Don't update the seen-signals state file")
