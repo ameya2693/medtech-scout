@@ -1,11 +1,23 @@
-"""Cross-source signal clustering into candidate Ventures.
+"""Company-anchored venture grouping.
 
-Signals are linked when they share a COMPANY organisation or a person.
-Lesson learned: linking on any organisation let hub nodes (e.g. University of
-Leeds) chain 113 unrelated signals into one mega-cluster ("MOLOGIC LTD").
-Fixes: (1) org linking is restricted to company orgs; (2) any link key that
-touches more than MAX_SIGNALS_PER_CLUSTER_KEY signals is treated as a hub and
-skipped (with a warning).
+A venture is a COMPANY; its signals are the distinct projects it takes part in.
+
+Earlier versions used connected components (union-find): any shared organisation
+merged two signals, and merges chained transitively. Large CORDIS consortia
+(10-25 partners) therefore fused unrelated projects into one blob (19 signals
+under "MOLOGIC LTD", earlier 114). Here nothing is merged transitively: each
+signal is simply listed under every company that qualifies as an anchor.
+
+Rules:
+  * Only company organisations anchor (is_company_org; research centres,
+    hospitals and non-profits are excluded) and never ORG_STOPLIST names.
+  * Signals from big consortia (> MAX_ANCHOR_ORGS partners) do not anchor
+    anybody: a company in a 20-partner network is not "that company's project".
+  * The same project found via both GtR and CORDIS (Horizon Europe Guarantee)
+    is de-duplicated by normalised title + start date before counting.
+  * Company names are canonicalised (legal suffix and country tag stripped) so
+    'RapidX Bio Ltd' / 'RAPIDX BIO LIMITED' / 'Rapidx Bio Ltd. (UK)' coincide.
+  * A venture needs >= 2 distinct projects to be reported.
 """
 from __future__ import annotations
 
@@ -21,22 +33,24 @@ logger = logging.getLogger(__name__)
 _COUNTRY_SUFFIX_RE = re.compile(r"\s*\([A-Z]{2,3}\)\s*$")
 _TRAILING_PUNCT_RE = re.compile(r"[.,;:]+$")
 _WHITESPACE_RE = re.compile(r"\s+")
+_LEGAL_SUFFIX_RE = re.compile(
+    r"\s+(LTD|LIMITED|LLC|PLC|INC|INCORPORATED|CORP|CORPORATION|GMBH|SA|SRL|BV|AG|AB|OY|NV|SARL|PTY LTD|PTY)\.?$"
+)
+_NON_ALNUM_RE = re.compile(r"[^A-Z0-9 ]+")
 
 ORG_STOPLIST = {
-    "NPL MANAGEMENT LIMITED",
-    "NATIONAL OCEANOGRAPHY CENTRE",
-    "CENTRE NATIONAL DE LA RECHERCHE SCIENTIFIQUE CNRS",
-    "FRAUNHOFER GESELLSCHAFT ZUR FORDERUNG DER ANGEWANDTEN FORSCHUNG EV",
-    "KATHOLIEKE UNIVERSITEIT LEUVEN",
-    "STICHTING IMEC NEDERLAND",
-    "INSTITUT PASTEUR",
-    "LONDON SCHOOL OF HYGIENE AND TROPICAL MEDICINE",
-    "LONDON SCHOOL OF HYGIENE AND TROPICAL MEDICINE ROYAL CHARTER",
+    "NPL MANAGEMENT", "NATIONAL OCEANOGRAPHY CENTRE", "INSTITUT PASTEUR",
 }
+# Name fragments of generic consultancies / management shells that tell us
+# nothing about a product company.
+LOW_SIGNAL_NAME_PARTS = ("CONSULTING", "CONSULTANCY", " MANAGEMENT")
 
-MAX_SIGNALS_PER_CLUSTER_KEY = 6
+MAX_ANCHOR_ORGS = 8
+MIN_PROJECTS_PER_VENTURE = 2
+MAX_PROJECTS_PER_VENTURE = 12   # beyond this the "company" is almost certainly a hub
 CLUSTER_SIZE_BONUS_PER_EXTRA_SIGNAL = 1.0
 CLUSTER_SIZE_BONUS_CAP = 4.0
+MULTI_SOURCE_BONUS = 0.5
 
 
 def normalize_org_name(name: str) -> str:
@@ -45,94 +59,85 @@ def normalize_org_name(name: str) -> str:
     return _WHITESPACE_RE.sub(" ", n).upper()
 
 
-def normalize_person_name(name: str) -> str:
-    return _WHITESPACE_RE.sub(" ", (name or "").strip()).upper()
+def company_key(name: str) -> str:
+    """Canonical key: uppercase, no country tag, no legal suffix, no punctuation."""
+    n = normalize_org_name(name)
+    n = _LEGAL_SUFFIX_RE.sub("", n)
+    n = _NON_ALNUM_RE.sub("", n)
+    return _WHITESPACE_RE.sub(" ", n).strip()
 
 
-def _signal_org_keys(signal: Signal) -> set[str]:
-    keys = set()
-    for org in signal.organisations or []:
-        norm = normalize_org_name(org)
-        if not norm or not is_company_org(norm):
+def _project_signature(signal: Signal) -> str:
+    title = _NON_ALNUM_RE.sub("", (signal.title or "").upper())
+    title = _WHITESPACE_RE.sub(" ", title).strip()
+    return f"{title}|{getattr(signal, 'signal_date', None)}"
+
+
+def _anchor_companies(signal: Signal) -> dict[str, str]:
+    """{company_key: display_name} for the companies this signal anchors."""
+    orgs = signal.organisations or []
+    if len(orgs) > MAX_ANCHOR_ORGS:
+        return {}
+    out: dict[str, str] = {}
+    for org in orgs:
+        display = normalize_org_name(org)
+        if not display or not is_company_org(display):
             continue
-        if norm not in ORG_STOPLIST:
-            keys.add(f"org:{norm}")
-    return keys
+        if display in ORG_STOPLIST or any(p in f" {display}" for p in LOW_SIGNAL_NAME_PARTS):
+            continue
+        key = company_key(org)
+        if key and key not in ORG_STOPLIST:
+            out.setdefault(key, display)
+    return out
 
 
-def _signal_person_keys(signal: Signal) -> set[str]:
-    keys = set()
-    for p in signal.people or []:
-        norm = normalize_person_name(p)
-        if norm and "UNNAMED" not in norm:
-            keys.add(f"person:{norm}")
-    return keys
-
-
-def _pick_venture_name(cluster_signals: list[Signal]) -> str:
-    companies = Counter()
-    others = Counter()
-    for s in cluster_signals:
-        for org in s.organisations or []:
-            norm = normalize_org_name(org)
-            if not norm:
-                continue
-            (companies if is_company_org(norm) and norm not in ORG_STOPLIST else others)[norm] += 1
-    if companies:
-        return companies.most_common(1)[0][0]
-    if others:
-        return others.most_common(1)[0][0]
-    return (cluster_signals[0].title or "Unnamed")[:60]
-
-
-def _build_venture(cluster_signals: list[Signal]) -> Venture:
-    best = max(s.score for s in cluster_signals)
-    extra = len(cluster_signals) - 1
-    bonus = min(extra * CLUSTER_SIZE_BONUS_PER_EXTRA_SIGNAL, CLUSTER_SIZE_BONUS_CAP)
-    reasons = []
-    if extra:
-        reasons.append(f"+{bonus:.1f} clustered: {len(cluster_signals)} signals")
-        sources = sorted({s.source for s in cluster_signals})
-        if len(sources) > 1:
-            reasons.append(f"multi-source ({', '.join(sources)})")
-    return Venture(
-        name=_pick_venture_name(cluster_signals),
-        signals=sorted(cluster_signals, key=lambda s: s.score, reverse=True),
-        score=best + bonus,
-        score_reasons=reasons,
-    )
+def _merge_duplicates(signals: list[Signal]) -> list[list[Signal]]:
+    """Group cross-source duplicates of the same project."""
+    groups: dict[str, list[Signal]] = defaultdict(list)
+    for s in signals:
+        groups[_project_signature(s)].append(s)
+    return list(groups.values())
 
 
 def build_ventures(signals: list[Signal]) -> list[Venture]:
-    parent = list(range(len(signals)))
+    projects = _merge_duplicates(signals)
 
-    def find(i):
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
+    by_company: dict[str, list[list[Signal]]] = defaultdict(list)
+    names: dict[str, Counter] = defaultdict(Counter)
+    for proj in projects:
+        keys: dict[str, str] = {}
+        for s in proj:
+            keys.update(_anchor_companies(s))
+        for key, display in keys.items():
+            by_company[key].append(proj)
+            names[key][display] += 1
 
-    def union(a, b):
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[rb] = ra
-
-    key_to_idx: dict[str, list[int]] = defaultdict(list)
-    for i, s in enumerate(signals):
-        for k in _signal_org_keys(s) | _signal_person_keys(s):
-            key_to_idx[k].append(i)
-
-    for key, idxs in key_to_idx.items():
-        if len(idxs) > MAX_SIGNALS_PER_CLUSTER_KEY:
-            logger.warning("Skipping hub link key %r (%d signals)", key, len(idxs))
+    ventures: list[Venture] = []
+    for key, projs in by_company.items():
+        if len(projs) < MIN_PROJECTS_PER_VENTURE:
             continue
-        for j in idxs[1:]:
-            union(idxs[0], j)
-
-    groups: dict[int, list[Signal]] = defaultdict(list)
-    for i, s in enumerate(signals):
-        groups[find(i)].append(s)
-
-    ventures = [_build_venture(g) for g in groups.values()]
+        if len(projs) > MAX_PROJECTS_PER_VENTURE:
+            logger.warning("Skipping hub company %r (%d projects)", key, len(projs))
+            continue
+        flat = [s for proj in projs for s in proj]
+        best = max(s.score for s in flat)
+        extra = len(projs) - 1
+        bonus = min(extra * CLUSTER_SIZE_BONUS_PER_EXTRA_SIGNAL, CLUSTER_SIZE_BONUS_CAP)
+        sources = sorted({s.source for s in flat})
+        reasons = [f"+{bonus:.1f} clustered: {len(projs)} distinct projects"]
+        if len(sources) > 1:
+            bonus += MULTI_SOURCE_BONUS
+            reasons.append(f"+{MULTI_SOURCE_BONUS:.1f} multi-source ({', '.join(sources)})")
+        dup = len(flat) - len(projs)
+        if dup:
+            reasons.append(f"{dup} cross-source duplicate(s) merged")
+        ventures.append(
+            Venture(
+                name=names[key].most_common(1)[0][0],
+                signals=sorted(flat, key=lambda s: s.score, reverse=True),
+                score=best + bonus,
+                score_reasons=reasons,
+            )
+        )
     ventures.sort(key=lambda v: v.score, reverse=True)
     return ventures

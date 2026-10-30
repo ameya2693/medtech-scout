@@ -58,6 +58,8 @@ TOPIC_TERM_WEIGHT = 0.5     # per distinct matched domain term
 TOPIC_TERM_CAP = 6          # caps so one keyword-stuffed abstract can't dominate purely on volume
 STRONG_TERM_BONUS = 1.0     # extra credit when a STRONG_TERMS phrase fired directly (higher precision than a platform+application pair)
 
+LARGE_CONSORTIUM_ORGS = 8    # CORDIS projects with more partners than this get a damped company bonus
+LARGE_CONSORTIUM_FACTOR = 0.4
 COMPANY_ORG_BONUS = 2.5     # "which companies are getting funded" -- the explicit priority
 
 COMMERCIAL_GRANT_BONUS = 2.0    # KTP / Grant for R&D / Innovate UK-style: money headed toward a product/company
@@ -142,8 +144,15 @@ def score_signal(signal: Signal, *, today: date | None = None) -> Signal:
     # heuristic alone missed) OR the name-suffix heuristic (works for CORDIS
     # too, which has no regNumber equivalent).
     if signal.raw.get("org_has_regnum") or any_company_org(signal.organisations):
-        score += COMPANY_ORG_BONUS
-        reasons.append(f"company organisation present (+{COMPANY_ORG_BONUS:.2f})")
+        bonus = COMPANY_ORG_BONUS
+        label = "company organisation present"
+        # A company somewhere in a 20-partner CORDIS consortium is weak evidence
+        # that the project is company-led, so damp the bonus.
+        if signal.source == "cordis" and len(signal.organisations) > LARGE_CONSORTIUM_ORGS:
+            bonus = COMPANY_ORG_BONUS * LARGE_CONSORTIUM_FACTOR
+            label = f"company in large consortium ({len(signal.organisations)} orgs)"
+        score += bonus
+        reasons.append(f"{label} (+{bonus:.2f})")
 
     # Commercial vs. academic grant track. Only fires for signals that carry
     # a grantCategory (currently GtR only -- CORDIS doesn't expose an
