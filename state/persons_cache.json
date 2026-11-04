@@ -1,0 +1,229 @@
+{
+  "organisations": {
+    "ECCED9F3-523A-4CC5-A70E-9B9C0A1B5C7D": {
+      "name": "LOUGHBOROUGH UNIVERSITY",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "E22148EF-AA07-46B2-AE25-5A3C12BA0857": {
+      "name": "UNIVERSITY OF ABERDEEN",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "433D9211-CF4C-4D3F-9AA9-5372E3145A59": {
+      "name": "University of Bradford",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "53C33BDB-1E84-43CE-8661-4DDEFC8F0299": {
+      "name": "UNIVERSITY OF BATH",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "F9C562FF-8756-448F-AAB9-D5389E7BC750": {
+      "name": "University of Cape Town Lung Institute",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "23B1695D-4900-4E78-87AF-9CEB5F1C5E52": {
+      "name": "QUEEN'S UNIVERSITY BELFAST",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "B6A72C78-DBF1-4AA9-AC36-8685636DFB7A": {
+      "name": "CARDIFF UNIVERSITY",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "6E6F3C03-2F52-402B-8437-7433F5B9C3A4": {
+      "name": "University of the West of England",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "7AA8A6D1-CE51-4C06-BA76-C608ABB61519": {
+      "name": "UNIVERSITY OF LEICESTER",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "1F172E66-784B-4DFF-A194-B0FCBB1C0CA0": {
+      "name": "UNIVERSITY OF BIRMINGHAM",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "6757DCBD-3A34-456A-953D-DF593C49F977": {
+      "name": "UNIVERSITY OF PORTSMOUTH",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "C250D6E3-1555-439F-A0DD-889B0D113D01": {
+      "name": "KING'S COLLEGE LONDON",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "42C112BF-D51F-46DC-8159-462AF572B9F4": {
+      "name": "University of Liverpool",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "7FF5A065-82D3-4873-8F0D-C291096DC6EF": {
+      "name": "UNIVERSITY OF EAST ANGLIA",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "4CE90D37-8D8D-4FF2-8B3A-B3FBA531F4D4": {
+      "name": "Bangor University",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "50EEF0BC-3753-464C-85B9-A24293AF091F": {
+      "name": "DURHAM UNIVERSITY",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "280BC83F-2950-4BF9-A0F6-6B9769EF6652": {
+      "name": "UNIVERSITY OF PLYMOUTH",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "F10C1DB7-8352-4B5E-9B34-CCB71D5C6AC5": {
+      "name": "UNIVERSITY OF MANCHESTER",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "A3776632-317E-48F5-96F1-83866E7BDFD8": {
+      "name": "UNIVERSITY OF EDINBURGH",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "4E4B9EA3-A624-4574-B5E3-978276BF15F3": {
+      "name": "University of Sheffield",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "CDC918BA-6B68-470D-8913-29B2FA909A79": {
+      "name": "NOC (Up to 31.10.2019)",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "C9B67E11-94C7-40CF-83A1-8DCEA291BF2E": {
+      "name": "UNIVERSITY OF YORK",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "FC7E22A2-C040-41AD-A3E6-00C702D74F59": {
+      "name": "University of Warwick",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "22A6EDA1-0950-4892-987E-D54C4A5BDBEA": {
+      "name": "University of Bristol",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "ED5B5272-4418-4F39-8EAE-7EEBA3A31178": {
+      "name": "PEPTIMATRIX",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "A8A9FEB3-6473-43BB-A104-CD0F0E878C59": {
+      "name": "ANIMAL AND PLANT HEALTH AGENCY",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "08C6F432-3D77-4961-95F7-D9FCCDAEEFFB": {
+      "name": "UNIVERSITY OF STRATHCLYDE",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "2AE6B36F-0001-46DD-8E77-82B893806B8B": {
+      "name": "SWANSEA UNIVERSITY",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "39AD93A1-947A-4F8B-B48D-3C350B2FBB7A": {
+      "name": "University of Hull",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "09DF2F5A-82C7-411D-8723-60E691CF0FDC": {
+      "name": "QUEEN MARY UNIVERSITY OF LONDON",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "22BD542C-7B51-4C80-80D1-BAF5F4AFC00F": {
+      "name": "UNIVERSITY OF SUSSEX",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "3164843B-97CB-4DF8-AC06-A54910566687": {
+      "name": "JOHN INNES CENTRE",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "2D73F0FD-9703-4250-AEAC-165414690104": {
+      "name": "University of Surrey",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "8D60FA62-A163-4C56-872A-FE230502E94F": {
+      "name": "CRANFIELD UNIVERSITY",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "0CFE4273-1B98-4C7E-AEF3-8D692A92C2E3": {
+      "name": "Science and Technology Facilities Council",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "1A4C28F5-F855-403F-9637-E87F3C4B3740": {
+      "name": "UNIVERSITY OF DUNDEE",
+      "has_regnum": false,
+      "reg_number": ""
+    },
+    "FBEA73FB-82B7-4301-B7F2-7A79513CA774": {
+      "name": "MICROFLUIDX LTD",
+      "has_regnum": false,
+      "reg_number": ""
+    }
+  },
+  "persons": {
+    "70B05100-B754-4C8D-A66D-2109D9EB82FA": "Elizabeth Hall",
+    "E9BF1842-AF3E-45EB-9BED-35C574A43368": "Gary Frost",
+    "8E30EBB9-210B-4B22-8079-9EDF2548B777": "Roisin Owens",
+    "94DDABE5-8520-45DF-AD53-66CF32B94D6B": "Nicolas Szita",
+    "17B7CF12-7323-4A25-BBA4-CEA524B38F98": "Laura McCoy",
+    "E786DEDF-39C5-4F9A-8314-C7604AB1EBB3": "Martin Knight",
+    "4EC54C1C-FB90-4467-B36D-4A0B64887D28": "Michael Booth",
+    "98B60513-B7F6-4FB8-A8C9-90151D9F8736": "Michelle Willicombe",
+    "2FD623E1-926E-4C08-B510-2675DF6CDD58": "Hazel Screen",
+    "BD1CD486-EC2C-42A6-9AAF-7761B8AFCC67": "Lorenzo Di Michele",
+    "369C7E65-E3D0-4D07-B171-05A17D23AACA": "Pietro Cicuta",
+    "99684985-2B74-453D-ADEE-5A47EE512D97": "Serafim Kalliadasis",
+    "9A846EA2-BD08-4B85-8BA1-1ADE132EF753": "Paul Dalby",
+    "ACAA8633-E21C-4834-8DEB-D62569A1CC50": "Yansha Deng",
+    "F530A7CE-5EA5-4D3E-9C39-402523E34E3F": "Molly Stevens",
+    "C17E3A04-61B9-48A3-9A04-682F975399C3": "Rachel McKendry",
+    "909F6B52-CC30-41D4-A0C9-79C1D3E70634": "Nicolas Szita",
+    "64F50603-BBE0-44A5-BCDA-0DCFA0AA573C": "Ramin Raouf",
+    "DDB5F29A-3EE1-407B-9E4B-6585042721AB": "Alexander Tucker",
+    "B808E183-7ECA-40AE-9746-EC4427EDDF03": "Paul Langford",
+    "82A27F9F-2D4A-4847-BBED-B43E2A2E1846": "James Ajioka",
+    "1AF1AB1B-2190-4ED3-B2D9-F7A5F66273F0": "Ali K. Yetisen",
+    "0A29249A-B444-4D1D-8EA6-C4C5494D94DF": "Ali Salehi-Reyhani",
+    "314C79C0-7945-4924-90A7-B76DDEA8BCAE": "Joshua Edel",
+    "3ECA4E21-3EC3-4A25-A959-8C659DEEB74D": "Chris Toumazou",
+    "523AA86B-A0C2-4F05-9478-A780769337B2": "Riccardo Sapienza",
+    "04884E33-F502-428E-9121-5796ADEEA5AE": "Yuri Korchev",
+    "AB919BFD-A4F6-4E5F-AFD5-B86E3B9361BE": "Aleksandar Ivanov",
+    "F4FC16EB-31E9-4571-91E4-C3E263B539A0": "Norbert Klein",
+    "0A2916AC-B66D-4112-8FD5-C2B043AE5942": "Adrian Carl Stevenson",
+    "39A4BFB9-2444-4D6A-86F2-E7C2DB67AECC": "Pankaj Vadgama",
+    "9A0A0DF8-13DD-4A29-9C83-6EF6BC46D1C3": "Syed Tariq Sadiq",
+    "611968A3-D653-4333-8452-F0E4D60DAC6A": "Anand Shah",
+    "84DE5FE2-BE0F-4F99-A30D-72863F28B227": "Beata Wojciak-Stothard",
+    "46B71227-B573-4558-8AF1-054E33ACDD60": "Marco Liverani",
+    "320B2909-D947-41E1-BD60-974DB0B4A756": "Daniel Altmann",
+    "0BC5B081-6268-4713-BE17-7401BB509F50": "Nuno Miguel Oliveira",
+    "A714ABF6-EDE4-441B-864C-53650CC95E55": "Izabela Kraszewska"
+  }
+}
