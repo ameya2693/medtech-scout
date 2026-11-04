@@ -15,6 +15,8 @@ from datetime import date, datetime
 from typing import Optional
 
 from core.models import Signal, Venture
+from core.cluster import company_key
+from sources.companies_house import format_company_info
 
 
 def _fallback_commentary(signal: Signal) -> str:
@@ -78,6 +80,14 @@ def _venture_section(ventures: list[Venture]) -> list[str]:
         lines.append("")
         lines.append(f"- **Sources:** {', '.join(sources)}")
         lines.append(f"- **Why clustered:** {'; '.join(v.score_reasons)}")
+        seen_numbers: set[str] = set()
+        for s in v.signals:
+            for number, info in (s.raw.get("company_info") or {}).items():
+                if number in seen_numbers:
+                    continue
+                if company_key(info.get("name", "")) == company_key(v.name):
+                    seen_numbers.add(number)
+                    lines.append(f"- **Company register:** {format_company_info(info)}")
         lines.append("- **Contributing signals:**")
         for s in v.signals:
             date_str = s.signal_date.isoformat() if s.signal_date else "date unknown"
@@ -149,6 +159,8 @@ def build_report(
         lines.append(f"- **Organisation(s):** {orgs}")
         lines.append(f"- **People:** {people}")
         lines.append(f"- **Date:** {date_str}")
+        for info in list((s.raw.get("company_info") or {}).values())[:3]:
+            lines.append(f"- **Company register:** {format_company_info(info)}")
         lines.append(f"- **Score:** {s.score} ({'; '.join(s.score_reasons)})")
         if s.url:
             lines.append(f"- **Link:** {s.url}")

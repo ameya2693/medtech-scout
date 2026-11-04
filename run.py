@@ -39,6 +39,7 @@ except ImportError:
 from core.cluster import build_ventures
 from core.score import score_signals
 from report.markdown import build_report
+from sources import companies_house
 from sources import cordis, gtr
 from state.store import DEFAULT_STATE_PATH, load_seen_keys, save_seen_keys
 from synth.claude import synthesize_commentary
@@ -124,6 +125,17 @@ def main(argv: list[str] | None = None) -> int:
         "%d ventures found, %d are multi-signal clusters",
         len(ventures), len(multi_signal_ventures),
     )
+
+    # Companies House enrichment (display-only; no-op without COMPANIES_HOUSE_API_KEY).
+    # Covers the report's signals plus every signal inside a multi-signal cluster.
+    try:
+        to_enrich = {id(s): s for s in scored}
+        for v in multi_signal_ventures:
+            for s in v.signals:
+                to_enrich[id(s)] = s
+        companies_house.enrich(list(to_enrich.values()))
+    except Exception as exc:  # noqa: BLE001 - enrichment must never break a run
+        logger.warning("Companies House enrichment failed, continuing without it: %s", exc)
 
     logger.info("Diffing against previous state (%s)...", args.state_path)
     seen_before = load_seen_keys(args.state_path)

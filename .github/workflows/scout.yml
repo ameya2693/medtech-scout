@@ -27,6 +27,7 @@ jobs:
       - name: Run the scout
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          COMPANIES_HOUSE_API_KEY: ${{ secrets.COMPANIES_HOUSE_API_KEY }}
         run: python run.py -v
 
       - name: Commit and push new report + state

@@ -291,8 +291,8 @@ def _fetch_org_details(uuid: str) -> Optional[dict[str, Any]]:
     name = html.unescape(data.get("name") or "").strip()
     if not name:
         return None
-    has_regnum = bool((data.get("regNumber") or "").strip())
-    return {"name": name, "has_regnum": has_regnum}
+    reg_number = str(data.get("regNumber") or "").strip()
+    return {"name": name, "has_regnum": bool(reg_number), "reg_number": reg_number}
 
 
 def resolve_names(signals: list[Signal]) -> None:
@@ -323,6 +323,8 @@ def resolve_names(signals: list[Signal]) -> None:
         if entry is None:
             return True
         if isinstance(entry, str):  # old cache format, missing has_regnum
+            return True
+        if "reg_number" not in entry:  # cached before we stored the number itself (needed by Companies House)
             return True
         return False
 
@@ -359,6 +361,7 @@ def resolve_names(signals: list[Signal]) -> None:
 
         org_ids = s.raw.get("org_ids", [])
         org_names: list[str] = []
+        org_regnums: dict[str, str] = {}
         has_regnum = False
         for oid in org_ids:
             entry = org_cache.get(oid)
@@ -370,7 +373,10 @@ def resolve_names(signals: list[Signal]) -> None:
             org_names.append(entry.get("name", ""))
             if entry.get("has_regnum"):
                 has_regnum = True
+                if entry.get("reg_number") and entry.get("name"):
+                    org_regnums[entry["name"]] = entry["reg_number"]
         s.organisations = [n for n in org_names if n]
+        s.raw["org_regnums"] = org_regnums  # {org name: Companies House number}, used by sources/companies_house.py
 
         # Innovate UK funds R&D to companies. If its LEAD organisation has no
         # academic/research marker in its name but also no regNumber on record
