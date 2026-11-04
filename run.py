@@ -129,10 +129,12 @@ def main(argv: list[str] | None = None) -> int:
     # Companies House enrichment (display-only; no-op without COMPANIES_HOUSE_API_KEY).
     # Covers the report's signals plus every signal inside a multi-signal cluster.
     try:
-        to_enrich = {id(s): s for s in scored}
-        for v in multi_signal_ventures:
+        to_enrich: dict[int, object] = {}
+        for v in multi_signal_ventures:      # repeat-funded companies first
             for s in v.signals:
                 to_enrich[id(s)] = s
+        for s in scored:
+            to_enrich.setdefault(id(s), s)
         companies_house.enrich(list(to_enrich.values()))
     except Exception as exc:  # noqa: BLE001 - enrichment must never break a run
         logger.warning("Companies House enrichment failed, continuing without it: %s", exc)

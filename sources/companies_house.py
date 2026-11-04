@@ -1,9 +1,15 @@
 """Companies House enrichment (Phase 3, enrichment half).
 
-Looks up UK companies the scout already knows about -- by their official
-registration number, which GtR supplies as `regNumber` -- and attaches
+Looks up UK companies the scout already knows about and attaches
 register facts to each signal: incorporation date and age, status, SIC codes,
 who controls the company (PSC), and current directors.
+
+GtR's `regNumber` turned out to be empty for every organisation we cache, so
+companies are found by NAME on the register (/search/companies). UK company
+names are unique among live companies, so an exact match on the canonical
+name (legal suffix and punctuation stripped) is reliable; anything else is
+left unmatched rather than guessed. If a signal ever does carry registration
+numbers in `raw["org_regnums"]`, those are used directly.
 
 Display-only for now: it does NOT change scores. Once we have seen a few
 reports of real data we can decide how age / university-PSC should weigh in.
@@ -33,7 +39,10 @@ from typing import Any, Optional
 
 import requests
 
-from core.domain import _ACADEMIC_MARKER_RE
+from urllib.parse import quote
+
+from core.cluster import company_key
+from core.domain import _ACADEMIC_MARKER_RE, is_company_org
 from core.models import Signal
 
 logger = logging.getLogger(__name__)
@@ -264,6 +273,46 @@ def _fresh(entry: dict[str, Any]) -> bool:
     return bool(fetched) and (date.today() - fetched) <= timedelta(days=CACHE_TTL_DAYS)
 
 
+# ---------------------------------------------------------------- name -> number
+
+_COUNTRY_TAG_RE = re.compile(r"\s*\(([A-Z]{2,3})\)\s*$")
+
+
+def _split_country(name: str) -> tuple[str, str]:
+    m = _COUNTRY_TAG_RE.search(name or "")
+    return (name[:m.start()].strip(), m.group(1)) if m else ((name or "").strip(), "")
+
+
+def resolve_number(client: Client, name: str) -> Optional[str]:
+    """Find a company's registration number from its name via the search
+    endpoint. Exact canonical-name match only; prefers an active company."""
+    clean, _ = _split_country(name)
+    data = client.get(f"/search/companies?q={quote(clean)}&items_per_page=10")
+    if not data:
+        return None
+    target = company_key(clean)
+    matches = [i for i in data.get("items", []) or [] if company_key(i.get("title", "")) == target]
+    if not matches:
+        return None
+    matches.sort(key=lambda i: (i.get("company_status") != "active", i.get("date_of_creation", "") or ""), reverse=False)
+    active = [i for i in matches if i.get("company_status") == "active"]
+    best = active[0] if active else matches[-1]
+    return normalise_number(best.get("company_number", "")) or None
+
+
+def _candidate_orgs(s: Signal) -> list[str]:
+    """UK company organisations on a signal worth looking up."""
+    inferred = s.raw.get("org_company_inferred")
+    out = []
+    for org in s.organisations or []:
+        clean, country = _split_country(org)
+        if country and country not in ("UK", "GB"):
+            continue
+        if is_company_org(clean) or clean == inferred:
+            out.append(org)
+    return out
+
+
 # ---------------------------------------------------------------- public API
 
 def fetch_company(client: Client, number: str) -> Optional[dict[str, Any]]:
@@ -292,22 +341,49 @@ def enrich(signals: list[Signal], client: Optional[Client] = None,
             return 0
         client = Client(key)
 
+    cache = _load_cache(cache_path)
+    names_cache: dict[str, Any] = cache.setdefault("_names", {})
+
+    # Step 1: resolve company names to registration numbers (cached, including misses).
+    resolved = 0
+    for s in signals:
+        regs = dict(s.raw.get("org_regnums") or {})
+        for org in _candidate_orgs(s):
+            if org in regs:
+                continue
+            key = company_key(_split_country(org)[0])
+            entry = names_cache.get(key)
+            if entry is None or not _fresh(entry):
+                if client.exhausted:
+                    continue
+                try:
+                    number = resolve_number(client, org)
+                except CompaniesHouseError as exc:
+                    logger.warning("Companies House search failed for %r: %s", org, exc)
+                    continue
+                entry = {"fetched": date.today().isoformat(), "number": number}
+                names_cache[key] = entry
+                resolved += 1
+            if entry.get("number"):
+                regs[org] = entry["number"]
+        s.raw["org_regnums"] = regs
+
     wanted: dict[str, None] = {}
     for s in signals:
         for number in (s.raw.get("org_regnums") or {}).values():
             n = normalise_number(number)
             if n:
                 wanted[n] = None
+    logger.info("Companies House: %d names searched this run, %d registration numbers known", resolved, len(wanted))
     if not wanted:
-        logger.info("Companies House: no registration numbers on these signals")
+        _save_cache(cache, cache_path)
         return 0
 
-    cache = _load_cache(cache_path)
     found = 0
     fetched = 0
     for number in wanted:
         entry = cache.get(number)
-        if entry and _fresh(entry):
+        if entry and isinstance(entry, dict) and _fresh(entry):
             continue
         if client.exhausted:
             break
