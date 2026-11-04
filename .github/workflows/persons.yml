@@ -53,5 +53,12 @@ jobs:
           git add reports/ state/
           git diff --cached --quiet && echo "Nothing new to commit" && exit 0
           git commit -m "Automated persons run: $(date -u +'%Y-%m-%d')"
-          git pull --rebase origin "${GITHUB_REF_NAME}"
-          git push
+          # GitHub occasionally answers a push with a transient 500; retry rather than lose the run.
+          for attempt in 1 2 3 4; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" || true
+            git push && exit 0
+            echo "push failed (attempt ${attempt}/4), retrying"
+            sleep $((attempt * 15))
+          done
+          echo "push failed after 4 attempts"
+          exit 1
