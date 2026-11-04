@@ -52,33 +52,91 @@ def _shape(obj: Any, depth: int = 3) -> Any:
     return type(obj).__name__
 
 
-def probe(n_projects: int = 3, n_people: int = 5) -> None:
-    """Record the structure of live project and person payloads so fields such
-    as ORCID or employer links can be verified before any parsing relies on them."""
+def probe(path: Path | None = None, get=None, max_person_samples: int = 8) -> dict[str, Any]:
+    """Aggregate, value-free facts about live GtR payloads, to verify assumptions before relying on them.
+
+    Records only counts, funder / category names and key names. No person names or free text.
+    Answers: which funders' projects carry PI / Co-I / PM links at all; what the person payload
+    contains (e.g. ORCID, links to an employing organisation).
+    """
+    from collections import Counter, defaultdict
+
     log = logging.getLogger("probe")
-    term = gtr_search_terms()[0]
-    projects = []
-    for p in gtr.search_projects(term):
-        projects.append(p)
-        if len(projects) >= n_projects:
-            break
-    person_ids: list[str] = []
-    for p in projects:
-        for link in gtr._iter_links(p):
-            if (link.get("rel") or "").upper() in ("PI_PER", "COI_PER"):
-                person_ids.append(gtr._uuid_from_href(link.get("href", "")))
-    person_shapes = []
-    for pid in list(dict.fromkeys(person_ids))[:n_people]:
-        person_shapes.append(_shape(gtr._get_with_retries(f"{gtr.BASE_URL}/persons/{pid}")))
+    get = get or gtr._get_with_retries
+    path = path or store.PROBE_PATH
+
+    projects: dict[str, dict[str, Any]] = {}
+    for term in gtr_search_terms():
+        try:
+            data = get(f"{gtr.BASE_URL}/projects", {"q": term, "p": 1, "s": gtr.PAGE_SIZE})
+        except gtr.GtRClientError as exc:
+            log.warning("probe: search %r failed: %s", term, exc)
+            continue
+        found = data.get("project", [])
+        for proj in ([found] if isinstance(found, dict) else found):
+            projects[proj.get("id") or str(len(projects))] = proj
+    log.info("probe: %d distinct projects sampled", len(projects))
+
+    tracked = ("PI_PER", "COI_PER", "PM_PER", "STUDENT_PER")
+    per_funder: dict[str, Counter] = defaultdict(Counter)
+    categories: dict[str, Counter] = defaultdict(Counter)
+    rel_sets: Counter = Counter()
+    for proj in projects.values():
+        funder = (proj.get("leadFunder") or "?").strip() or "?"
+        rels = sorted({(l.get("rel") or "").upper() for l in gtr._iter_links(proj)})
+        per_funder[funder]["projects"] += 1
+        for r in tracked:
+            if r in rels:
+                per_funder[funder][r] += 1
+        categories[funder][(proj.get("grantCategory") or "").strip() or "(none)"] += 1
+        rel_sets[(funder, tuple(rels))] += 1
+
+    # Person samples: up to 2 per (Innovate UK vs other funder, link type), taken from projects that have such a link.
+    samples, taken = [], Counter()
+    for proj in projects.values():
+        funder = (proj.get("leadFunder") or "?").strip()
+        group = "Innovate UK" if funder == "Innovate UK" else "other"
+        for link in gtr._iter_links(proj):
+            rel = (link.get("rel") or "").upper()
+            if rel not in ("PI_PER", "COI_PER", "PM_PER") or taken[(group, rel)] >= 2:
+                continue
+            if len(samples) >= max_person_samples:
+                break
+            taken[(group, rel)] += 1
+            try:
+                payload = get(f"{gtr.BASE_URL}/persons/{gtr._uuid_from_href(link.get('href', ''))}", None)
+            except gtr.GtRClientError as exc:
+                log.warning("probe: person fetch failed: %s", exc)
+                continue
+            plinks = (payload.get("links") or {}).get("link", []) if isinstance(payload, dict) else []
+            plinks = [plinks] if isinstance(plinks, dict) else plinks
+            samples.append({
+                "from_link": rel, "funder_group": group,
+                "person_link_rels": sorted({(l.get("rel") or "") for l in plinks}),
+                "shape": _shape(payload, 5),
+            })
+
+    def first_shape(pred):
+        for proj in projects.values():
+            if pred((proj.get("leadFunder") or "").strip()):
+                return _shape(proj, 5)
+        return None
+
     out = {
-        "term": term,
-        "project_shapes": [_shape(p) for p in projects],
-        "person_shapes": person_shapes,
-        "link_rels_seen": sorted({(l.get("rel") or "") for p in projects for l in gtr._iter_links(p)}),
+        "n_projects": len(projects),
+        "per_funder": {f: dict(c) for f, c in sorted(per_funder.items(), key=lambda kv: -kv[1]["projects"])},
+        "categories_by_funder": {f: dict(c.most_common(8)) for f, c in categories.items()},
+        "link_rel_sets": [
+            {"funder": f, "rels": list(r), "count": n} for (f, r), n in rel_sets.most_common(25)
+        ],
+        "person_samples": samples,
+        "project_shape_innovate_uk": first_shape(lambda f: f == "Innovate UK"),
+        "project_shape_other": first_shape(lambda f: f != "Innovate UK"),
     }
-    store.PROBE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    store.PROBE_PATH.write_text(json.dumps(out, indent=2), encoding="utf-8")
-    log.info("Wrote %s", store.PROBE_PATH)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    log.info("Wrote %s", path)
+    return out
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

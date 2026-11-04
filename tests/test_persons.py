@@ -231,6 +231,37 @@ class InnovateUKWeightTests(unittest.TestCase):
         self.assertEqual(r.ranked, [])
 
 
+class ProbeTests(unittest.TestCase):
+    def test_probe_aggregates_per_funder_and_stores_no_values(self):
+        import run_persons
+        iuk = project("IUK1", "Secret Title One", funder="Innovate UK", lead="ORG-CO")
+        iuk["links"]["link"].append({"rel": "PM_PER", "href": f"{BASE}/persons/P-M"})
+        rc = project("RC1", "Secret Title Two", funder="EPSRC", category="Research Grant",
+                     pi="P-A", cois=["P-B"])
+
+        def fake_get(url, params=None):
+            if "/persons/" in url:
+                return {"id": "x", "firstName": "SECRETFIRST", "surname": "SECRETLAST",
+                        "orcidId": "0000-0000-0000-0000",
+                        "links": {"link": [{"rel": "EMPLOYED_PER", "href": "h"}]}}
+            return {"project": [iuk, rc]}
+
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "probe.json"
+            out = run_persons.probe(path=path, get=fake_get)
+            text = path.read_text()
+        self.assertEqual(out["n_projects"], 2)
+        self.assertEqual(out["per_funder"]["Innovate UK"].get("PI_PER", 0), 0)
+        self.assertEqual(out["per_funder"]["Innovate UK"]["PM_PER"], 1)
+        self.assertEqual(out["per_funder"]["EPSRC"]["PI_PER"], 1)
+        self.assertEqual(out["per_funder"]["EPSRC"]["COI_PER"], 1)
+        self.assertEqual(out["categories_by_funder"]["EPSRC"], {"Research Grant": 1})
+        self.assertTrue(any("EMPLOYED_PER" in s["person_link_rels"] for s in out["person_samples"]))
+        self.assertIn("orcidId", text)                   # key names are recorded ...
+        for secret in ("SECRETFIRST", "SECRETLAST", "0000-0000", "Secret Title"):
+            self.assertNotIn(secret, text)               # ... values never are
+
+
 class CliTests(unittest.TestCase):
     def test_unknown_region_is_rejected(self):
         r = subprocess.run([sys.executable, str(ROOT / "run_persons.py"), "--region", "glasgow"],
