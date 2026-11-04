@@ -179,7 +179,7 @@ def any_company_org(organisations: list[str]) -> bool:
 # --- Commercial vs. academic-track grant classification ---------------------
 
 COMMERCIAL_GRANT_CATEGORY_TERMS = [
-    "grant for r&d", "collaborative r&d", "feasibility study",
+    "grant for r&d", "collaborative r&d", "feasibility stud",  # "stud" matches GtR's real "Feasibility Studies"
     "knowledge transfer partnership", "ktp", "smart grant", "innovate uk",
     "fast start",
 ]
