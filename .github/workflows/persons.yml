@@ -1,0 +1,57 @@
+name: Seed Scout (people)
+
+on:
+  schedule:
+    # Mondays 08:00 UTC, an hour after the company scout, to avoid pushing at the same moment.
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'run = full report; probe = dump GtR payload key names (no report)'
+        type: choice
+        options: [run, probe]
+        default: run
+      region:
+        description: 'Institution filter (name-based, approximate)'
+        type: choice
+        options: [london-cambridge, all]
+        default: london-cambridge
+
+permissions:
+  contents: write   # commit the report + state back
+
+jobs:
+  run-persons:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Unit tests (offline)
+        run: python -m unittest discover -s tests
+
+      - name: Probe GtR payload shapes
+        if: github.event.inputs.mode == 'probe'
+        run: python run_persons.py --probe -v
+
+      - name: Run persons scout
+        if: github.event.inputs.mode != 'probe'
+        run: python run_persons.py -v --region "${{ github.event.inputs.region || 'london-cambridge' }}"
+
+      - name: Commit and push report + state
+        run: |
+          git config user.name "medtech-scout-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add reports/ state/
+          git diff --cached --quiet && echo "Nothing new to commit" && exit 0
+          git commit -m "Automated persons run: $(date -u +'%Y-%m-%d')"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push
