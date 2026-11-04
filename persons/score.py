@@ -33,6 +33,12 @@ TOPIC_TERM_CAP = 6
 STRONG_TERM_BONUS = 1.0
 COMMERCIAL_GRANT_BONUS = 2.0    # KTP / Innovate UK R&D / feasibility style
 ACADEMIC_GRANT_PENALTY = -1.5   # studentship / fellowship / training
+# Funder-based, not category-based: on the first real run every university PI's grant was
+# labelled "Research Grant" / "Fellowship" etc., so grantCategory alone carried no translational
+# signal. Innovate UK money is product-directed by mandate, so it is weighted above research-council
+# money of otherwise identical topic and age. 1.5 is roughly three matched topic terms; tune here.
+INNOVATE_UK_FUNDER = "Innovate UK"
+INNOVATE_UK_BONUS = 1.5
 LARGE_CONSORTIUM_ORGS = 8
 LARGE_CONSORTIUM_FACTOR = 0.6
 CO_I_WEIGHT = 0.5               # a Co-I is weaker evidence of founder intent than the PI
@@ -75,6 +81,9 @@ def grant_value(pg: PersonGrant, today: date) -> tuple[float, str]:
     elif g.track == "academic":
         value += ACADEMIC_GRANT_PENALTY
         parts.append(f"academic track {ACADEMIC_GRANT_PENALTY:+.1f}")
+    if g.funder == INNOVATE_UK_FUNDER:
+        value += INNOVATE_UK_BONUS
+        parts.append(f"Innovate UK funder +{INNOVATE_UK_BONUS:.1f}")
     if g.n_orgs > LARGE_CONSORTIUM_ORGS:
         value *= LARGE_CONSORTIUM_FACTOR
         parts.append(f"large consortium ({g.n_orgs} orgs) x{LARGE_CONSORTIUM_FACTOR}")

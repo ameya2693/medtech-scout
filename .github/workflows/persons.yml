@@ -14,8 +14,8 @@ on:
       region:
         description: 'Institution filter (name-based, approximate)'
         type: choice
-        options: [london-cambridge, all]
-        default: london-cambridge
+        options: ['london-cambridge,edinburgh', 'london-cambridge', 'edinburgh', 'all']
+        default: 'london-cambridge,edinburgh'
 
 permissions:
   contents: write   # commit the report + state back
@@ -44,7 +44,7 @@ jobs:
 
       - name: Run persons scout
         if: github.event.inputs.mode != 'probe'
-        run: python run_persons.py -v --region "${{ github.event.inputs.region || 'london-cambridge' }}"
+        run: python run_persons.py -v --region "${{ github.event.inputs.region || 'london-cambridge,edinburgh' }}"
 
       - name: Commit and push report + state
         run: |

@@ -4,7 +4,7 @@ Person-centred counterpart to the company scout. Unit = a GtR PI / Co-I, keyed o
 Goal: find research groups *before* they incorporate, for very small pre-seed cheques.
 
 ```bash
-python run_persons.py --region london-cambridge     # report -> reports/persons-<date>.md
+python run_persons.py --region london-cambridge,edinburgh   # report -> reports/persons-<date>.md (regions: london-cambridge, edinburgh, all)
 python run_persons.py --probe                       # dump GtR payload key names -> state/persons_probe.json
 python run_persons.py --fixture f.json              # offline
 python -m unittest discover -s tests                # offline tests (synthetic payloads)
@@ -13,7 +13,7 @@ python -m unittest discover -s tests                # offline tests (synthetic p
 ## What step 1 does
 1. Same GtR domain searches as the scout, but **person roles are kept** (PI / Co-I; PM and student links ignored).
 2. Lead organisations resolved (company vs. academic, same rules as the scout). A PI's institution = the grant's lead organisation. A Co-I's institution is **not** in the project links, so it is left unknown, not guessed.
-3. Score = best grant (topic proximity, commercial vs. academic track, recency, consortium damping, Co-I at half weight) + sustained activity + PI-at-academic bonus; PIs on company-led grants are penalised and listed separately. Every point has a printed reason (`persons/score.py`).
+3. Score = best grant (topic proximity, commercial vs. academic track, recency, consortium damping, Co-I at half weight) + sustained activity + PI-at-academic bonus; an **Innovate UK funder bonus** (+1.5 per grant, `INNOVATE_UK_BONUS` in `persons/score.py`) lifts product-directed funding above research-council grants; PIs on company-led grants are penalised and listed separately. Every point has a printed reason (`persons/score.py`).
 4. Markdown report with funding history per person and a "new since last run" diff.
 
 ## Not done yet

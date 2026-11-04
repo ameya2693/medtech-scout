@@ -6,7 +6,7 @@ candidates, and writes reports/persons-<date>.md.
 
 Usage:
     python run_persons.py                          # full run
-    python run_persons.py --region london-cambridge
+    python run_persons.py --region london-cambridge,edinburgh
     python run_persons.py --dry-run                # don't update the 'seen' state
     python run_persons.py --probe                  # dump GtR payload key names to
                                                    # state/persons_probe.json (no report)
@@ -34,6 +34,7 @@ except ImportError:
 from core.domain import gtr_search_terms
 from persons import pipeline, store
 from persons.extract import fetch_grants, grants_from_projects
+from persons.regions import parse_regions
 from persons.report import build_report
 from sources import gtr
 
@@ -82,14 +83,20 @@ def probe(n_projects: int = 3, n_people: int = 5) -> None:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--region", choices=["all", "london-cambridge"], default="all")
+    ap.add_argument("--region", default="all",
+                    help="'all', or comma-separated: london-cambridge, edinburgh (e.g. london-cambridge,edinburgh)")
     ap.add_argument("--limit", type=int, default=60, help="Max people in the ranked list")
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--dry-run", action="store_true", help="Don't update seen state or caches")
     ap.add_argument("--probe", action="store_true", help="Dump payload key names and exit")
     ap.add_argument("--fixture", type=Path, default=None, help="Offline run from a JSON fixture")
     ap.add_argument("-v", "--verbose", action="store_true")
-    return ap.parse_args(argv)
+    args = ap.parse_args(argv)
+    try:
+        parse_regions(args.region)
+    except ValueError as exc:
+        ap.error(str(exc))
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:

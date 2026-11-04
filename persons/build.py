@@ -8,7 +8,7 @@ from typing import Any, Callable, Optional
 
 from core.domain import _ACADEMIC_MARKER_RE, is_company_org
 from persons.models import GrantRecord, Person, PersonGrant
-from persons.regions import in_london_cambridge
+from persons.regions import in_regions
 from sources import gtr
 
 logger = logging.getLogger(__name__)
@@ -58,7 +58,12 @@ def lead_is_company(funder: str, entry: Optional[dict[str, Any]]) -> bool:
     return funder == "Innovate UK" and bool(name) and not _ACADEMIC_MARKER_RE.search(name)
 
 
-def build_people(grants: list[GrantRecord], orgs: dict[str, dict[str, Any]]) -> dict[str, Person]:
+def build_people(
+    grants: list[GrantRecord],
+    orgs: dict[str, dict[str, Any]],
+    regions: Optional[list[str]] = None,
+) -> dict[str, Person]:
+    """`regions` = selected region names; empty/None flags against all known regions."""
     people: dict[str, Person] = {}
     for g in grants:
         entry = orgs.get(g.lead_org_id)
@@ -75,7 +80,7 @@ def build_people(grants: list[GrantRecord], orgs: dict[str, dict[str, Any]]) -> 
         p.institutions = [name for name, _ in counts.most_common()]
         p.company_linked = any(pg.lead_is_company for pg in pi)
         p.in_region = any(
-            in_london_cambridge(pg.lead_org_name) for pg in pi if not pg.lead_is_company
+            in_regions(pg.lead_org_name, regions) for pg in pi if not pg.lead_is_company
         )
     logger.info("Built %d people from %d grants", len(people), len(grants))
     return people

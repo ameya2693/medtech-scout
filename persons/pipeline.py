@@ -9,6 +9,7 @@ from typing import Any, Callable, Optional
 
 from persons.build import build_people, resolve_lead_orgs, resolve_names
 from persons.models import GrantRecord, Person
+from persons.regions import parse_regions
 from persons.score import score_people
 from sources import gtr
 
@@ -35,11 +36,12 @@ def run(
     fetch_name: Callable[[str, str], Optional[str]] = gtr._fetch_entity_name,
 ) -> Result:
     orgs, new_orgs = resolve_lead_orgs(grants, cache, fetch_org=fetch_org)
-    people = build_people(grants, orgs)
+    regions = parse_regions(region)
+    people = build_people(grants, orgs, regions)
     total = len(people)
 
     pool = list(people.values())
-    if region == "london-cambridge":
+    if regions:
         # Institution is only known for PI roles, so Co-I-only people drop out.
         pool = [p for p in pool if p.in_region]
 

@@ -171,7 +171,74 @@ class PipelineTests(unittest.TestCase):
         self.assertLess(score(fut), score(now))   # future-dated is capped, not treated as fresh
 
 
+class RegionTests(unittest.TestCase):
+    def test_edinburgh_names(self):
+        from persons.regions import in_regions
+        for name in ("University of Edinburgh", "Heriot-Watt University", "Edinburgh Napier University",
+                     "The Roslin Institute", "NHS Lothian"):
+            self.assertTrue(in_regions(name, ["edinburgh"]), name)
+        # Bare "Edinburgh" must not match companies; other cities must not match.
+        for name in ("Edinburgh Instruments Ltd", "University of Glasgow", "University of Bristol"):
+            self.assertFalse(in_regions(name, ["edinburgh"]), name)
+        self.assertFalse(in_regions("University of Edinburgh", ["london-cambridge"]))
+
+    def test_parse_regions(self):
+        from persons.regions import parse_regions
+        self.assertEqual(parse_regions("all"), [])
+        self.assertEqual(parse_regions(""), [])
+        self.assertEqual(parse_regions("london-cambridge, Edinburgh"), ["london-cambridge", "edinburgh"])
+        self.assertEqual(parse_regions("edinburgh,edinburgh"), ["edinburgh"])
+        with self.assertRaises(ValueError):
+            parse_regions("london-cambridge,glasgow")
+
+    def test_pipeline_combines_regions(self):
+        orgs = dict(ORGS)
+        orgs["ORG-EDI"] = {"name": "University of Edinburgh", "has_regnum": False, "reg_number": ""}
+        c = {"organisations": orgs, "persons": dict(NAMES)}
+        grants = grants_from_projects([
+            project("1", "Microfluidic diagnostic", pi="P-A", lead="ORG-IMP"),
+            project("2", "Microfluidic diagnostic", pi="P-C", lead="ORG-EDI"),
+            project("3", "Microfluidic diagnostic", pi="P-E", lead="ORG-LEEDS"),
+        ])
+        run = lambda region: {p.person_id for p in pipeline.run(
+            grants, c, region=region, today=TODAY,
+            fetch_org=lambda _i: None, fetch_name=lambda _t, _i: None).ranked}
+        self.assertEqual(run("edinburgh"), {"P-C"})
+        self.assertEqual(run("london-cambridge"), {"P-A"})
+        self.assertEqual(run("london-cambridge,edinburgh"), {"P-A", "P-C"})
+        self.assertEqual(run("all"), {"P-A", "P-C", "P-E"})
+
+
+class InnovateUKWeightTests(unittest.TestCase):
+    def _score(self, funder):
+        g = grants_from_projects([project("1", "Microfluidic diagnostic", funder=funder,
+                                          category="Research Grant", pi="P-A", start=ms(2025, 6))])
+        r = pipeline.run(g, cache(), today=TODAY, fetch_org=lambda _i: None, fetch_name=lambda _t, _i: None)
+        return r.ranked[0]
+
+    def test_innovate_uk_outranks_identical_research_council_grant(self):
+        from persons.score import INNOVATE_UK_BONUS
+        iuk, epsrc = self._score("Innovate UK"), self._score("EPSRC")
+        self.assertAlmostEqual(iuk.score - epsrc.score, INNOVATE_UK_BONUS, places=2)
+        self.assertTrue(any("Innovate UK funder" in r for r in iuk.score_reasons))
+        self.assertFalse(any("Innovate UK funder" in r for r in epsrc.score_reasons))
+
+    def test_innovate_uk_does_not_rescue_a_company_led_pi(self):
+        # An Innovate UK grant led by a company still leaves its PI company-linked and demoted.
+        g = grants_from_projects([project("4", "Microfluidic diagnostic", lead="ORG-CO", pi="P-D")])
+        r = pipeline.run(g, cache(), today=TODAY, fetch_org=lambda _i: None, fetch_name=lambda _t, _i: None)
+        self.assertEqual([p.person_id for p in r.company_linked], ["P-D"])
+        self.assertEqual(r.ranked, [])
+
+
 class CliTests(unittest.TestCase):
+    def test_unknown_region_is_rejected(self):
+        r = subprocess.run([sys.executable, str(ROOT / "run_persons.py"), "--region", "glasgow"],
+                           capture_output=True, text=True, cwd=ROOT,
+                           env={"PYTHONPATH": str(ROOT), "PATH": "/usr/bin:/bin"})
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("Unknown region", r.stderr)
+
     def test_offline_fixture_run_writes_report_without_touching_state(self):
         projects = [
             project("1", "Microfluidic diagnostic", pi="P-A", cois=["P-B"], pms=["P-M"], students=["P-S"]),
